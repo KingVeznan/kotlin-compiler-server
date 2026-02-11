@@ -18,7 +18,7 @@ const MAX_REQUESTS_PER_HOUR = 100;
 app.get('/', (req, res) => {
   res.json({
     message: "Kotlin Compiler Server is running!",
-    version: "1.0.2",
+    version: "1.0.3",
     endpoint: "/compile"
   });
 });
@@ -54,7 +54,7 @@ app.post('/compile', async (req, res) => {
       });
     }
 
-    // 🔑 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Оборачиваем код в класс JDoodle
+    // 🔑 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Правильный формат для JDoodle
     const fixedCode = fixKotlinCodeForJDoodle(code);
     
     console.log(`📤 Отправленный в JDoodle код (от ${ip}):`);
@@ -111,7 +111,7 @@ app.post('/compile', async (req, res) => {
   }
 });
 
-// 🔑 КЛЮЧЕВАЯ ФУНКЦИЯ: Оборачиваем код в класс JDoodle
+// 🔑 КЛЮЧЕВАЯ ФУНКЦИЯ: Правильный формат для JDoodle
 function fixKotlinCodeForJDoodle(rawCode) {
   // Удаляем package и комментарии
   let code = rawCode.trim()
@@ -122,15 +122,15 @@ function fixKotlinCodeForJDoodle(rawCode) {
 
   // Если код пустой — добавляем минимальный
   if (code.length === 0) {
-    return `class JDoodle {\n    fun main() {\n        println("Код пустой")\n    }\n}`;
+    return `class JDoodle {\n    companion object {\n        @JvmStatic\n        fun main(args: Array<String>) {\n            println("Код пустой")\n        }\n    }\n}`;
   }
 
-  // Оборачиваем в класс JDoodle
+  // Оборачиваем в класс JDoodle с правильной сигнатурой main
   const lines = code.split('\n')
-    .map(line => line.trim() === '' ? '' : `        ${line}`)
+    .map(line => line.trim() === '' ? '' : `            ${line}`)
     .join('\n');
   
-  return `class JDoodle {\n    fun main() {\n${lines}\n    }\n}`;
+  return `class JDoodle {\n    companion object {\n        @JvmStatic\n        fun main(args: Array<String>) {\n${lines}\n        }\n    }\n}`;
 }
 
 // Запуск сервера
