@@ -18,7 +18,7 @@ const MAX_REQUESTS_PER_HOUR = 100;
 app.get('/', (req, res) => {
   res.json({
     message: "Kotlin Compiler Server is running!",
-    version: "1.0.1",
+    version: "1.0.2",
     endpoint: "/compile"
   });
 });
@@ -54,7 +54,7 @@ app.post('/compile', async (req, res) => {
       });
     }
 
-    // ИСПРАВЛЕНИЕ: Гарантированно правильный формат для JDoodle
+    // 🔑 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Оборачиваем код в класс JDoodle
     const fixedCode = fixKotlinCodeForJDoodle(code);
     
     console.log(`📤 Отправленный в JDoodle код (от ${ip}):`);
@@ -62,13 +62,13 @@ app.post('/compile', async (req, res) => {
     console.log(fixedCode);
     console.log('---');
 
-    // Отправка в JDoodle с явным указанием версии Kotlin 1.8.0
+    // Отправка в JDoodle
     const response = await axios.post(
       'https://api.jdoodle.com/v1/execute',
       {
         script: fixedCode,
         language: 'kotlin',
-        versionIndex: '0', // Kotlin 1.8.0 — самая стабильная версия
+        versionIndex: '0',
         clientId: process.env.JDOODLE_CLIENT_ID,
         clientSecret: process.env.JDOODLE_CLIENT_SECRET
       },
@@ -76,15 +76,14 @@ app.post('/compile', async (req, res) => {
     );
 
     const jdoodleResult = response.data;
-    console.log(`✅ Ответ JDoodle: statusCode=${jdoodleResult.statusCode}, output="${jdoodleResult.output?.substring(0, 100)}..."`);
+    console.log(`✅ Ответ JDoodle: statusCode=${jdoodleResult.statusCode}, output length=${jdoodleResult.output?.length || 0}`);
 
+    // Проверка на ошибку внутри output
     let isRealSuccess = jdoodleResult.statusCode === 200;
     if (jdoodleResult.output && jdoodleResult.output.includes('Could not find or load main class')) {
       isRealSuccess = false;
-      console.log('⚠️ Обнаружена ошибка JDoodle внутри output!');
     }
-    
-    // ВСЕГДА возвращаем полный ответ, даже если есть ошибки компиляции
+
     res.json({
       success: isRealSuccess,
       output: jdoodleResult.output || 'Нет вывода',
@@ -112,41 +111,26 @@ app.post('/compile', async (req, res) => {
   }
 });
 
-// 🔑 КЛЮЧЕВАЯ ФУНКЦИЯ: Гарантированно правильный формат для JDoodle
+// 🔑 КЛЮЧЕВАЯ ФУНКЦИЯ: Оборачиваем код в класс JDoodle
 function fixKotlinCodeForJDoodle(rawCode) {
-  // Шаг 1: Удаляем ВСЕ объявления package
-  let code = rawCode.trim().replace(/^package\s+[^\n]+/gm, '').trim();
-  
-  // Шаг 2: Удаляем многострочные комментарии в начале (могут мешать)
-  code = code.replace(/^\/\*[\s\S]*?\*\//m, '').trim();
-  
-  // Шаг 3: Удаляем однострочные комментарии в начале
-  code = code.replace(/^\/\/[^\n]*\n/gm, '').trim();
-  
-  // Шаг 4: Проверяем наличие ПРАВИЛЬНОГО объявления main
-  // JDoodle требует именно: fun main() { ... } с фигурными скобками
-  const hasProperMain = /fun\s+main\s*\(\s*\)\s*\{/m.test(code);
-  
-  if (!hasProperMain) {
-    // Оборачиваем ВЕСЬ код в правильную структуру
-    // Убираем лишние пустые строки
-    code = code.replace(/^\s+|\s+$/g, '');
-    
-    // Если код пустой — возвращаем минимальный рабочий код
-    if (code.length === 0) {
-      return 'fun main() {\n    println("Код пустой")\n}';
-    }
-    
-    // Добавляем отступы для каждой строки
-    const lines = code.split('\n');
-    const indented = lines
-      .map(line => line.trim() === '' ? '' : `    ${line}`)
-      .join('\n');
-    
-    return `fun main() {\n${indented}\n}`;
+  // Удаляем package и комментарии
+  let code = rawCode.trim()
+    .replace(/^package\s+[^\n]+/gm, '')
+    .replace(/^\/\*[\s\S]*?\*\//gm, '')
+    .replace(/^\/\/[^\n]*\n/gm, '')
+    .trim();
+
+  // Если код пустой — добавляем минимальный
+  if (code.length === 0) {
+    return `class JDoodle {\n    fun main() {\n        println("Код пустой")\n    }\n}`;
   }
+
+  // Оборачиваем в класс JDoodle
+  const lines = code.split('\n')
+    .map(line => line.trim() === '' ? '' : `        ${line}`)
+    .join('\n');
   
-  return code;
+  return `class JDoodle {\n    fun main() {\n${lines}\n    }\n}`;
 }
 
 // Запуск сервера
