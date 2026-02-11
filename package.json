@@ -1,16 +1,11 @@
 {
   "name": "kotlin-compiler-server",
   "version": "1.0.0",
-  "description": "Сервер для облачной компиляции Kotlin кода",
-  "main": "server.js",
   "type": "module",
+  "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node server.js"
   },
-  "keywords": ["kotlin", "compiler", "api"],
-  "author": "",
-  "license": "MIT",
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
