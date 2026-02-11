@@ -8,13 +8,13 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '1mb' })); // Ограничиваем размер кода
+app.use(express.json({ limit: '1mb' }));
 
-// Простая защита от спама
+// Защита от спама
 const requestCounts = new Map();
-const MAX_REQUESTS_PER_HOUR = 100; // 100 запросов в час с одного IP
+const MAX_REQUESTS_PER_HOUR = 100;
 
-// Главная страница (для проверки)
+// Главная страница
 app.get('/', (req, res) => {
   res.json({
     message: "Kotlin Compiler Server is running!",
@@ -23,12 +23,11 @@ app.get('/', (req, res) => {
   });
 });
 
-// Эндпоинт для компиляции кода
+// Эндпоинт компиляции
 app.post('/compile', async (req, res) => {
-  const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
-  
-  // Проверка лимита запросов
+  const ip = req.ip || 'unknown';
   const count = (requestCounts.get(ip) || 0) + 1;
+  
   if (count > MAX_REQUESTS_PER_HOUR) {
     return res.status(429).json({ 
       error: 'Слишком много запросов. Попробуйте через час.' 
@@ -39,24 +38,18 @@ app.post('/compile', async (req, res) => {
 
   try {
     const { code } = req.body;
-
-    // Валидация входных данных
-    if (!code) {
-      return res.status(400).json({ error: 'Код не предоставлен' });
-    }
     
-    if (code.length > 5000) {
-      return res.status(400).json({ error: 'Код слишком длинный (максимум 5000 символов)' });
+    if (!code || code.length > 5000) {
+      return res.status(400).json({ 
+        error: 'Код не предоставлен или слишком длинный' 
+      });
     }
 
-    // Исправляем код (добавляем main если нужно)
+    // Исправление кода
     const fixedCode = fixKotlinCode(code);
-
-    console.log(`📤 Компиляция запрошена от ${ip}`);
-    console.log(`Код (первые 100 символов): ${fixedCode.substring(0, 100)}...`);
-
-    // Отправляем в JDoodle
-    const jdoodleResponse = await axios.post(
+    
+    // Отправка в JDoodle
+    const response = await axios.post(
       'https://api.jdoodle.com/v1/execute',
       {
         script: fixedCode,
@@ -68,60 +61,54 @@ app.post('/compile', async (req, res) => {
       { timeout: 15000 }
     );
 
-    const result = jdoodleResponse.data;
-    console.log(`✅ Компиляция успешна: ${result.statusCode}`);
-
     res.json({
       success: true,
-      output: result.output || 'Нет вывода',
-      statusCode: result.statusCode,
-      memory: result.memory,
-      cpuTime: result.cpuTime
+      output: response.data.output || 'Нет вывода',
+      cpuTime: response.data.cpuTime
     });
 
   } catch (error) {
-    console.error('❌ Ошибка компиляции:', error.message);
-
-    // Обрабатываем ошибки от JDoodle
-    if (error.response) {
-      const jdoodleError = error.response.data;
-      return res.status(400).json({
-        success: false,
-        error: jdoodleError.error || 'Ошибка компиляции',
-        details: jdoodleError
-      });
-    }
-
-    // Общие ошибки
-    res.status(500).json({
-      success: false,
-      error: 'Внутренняя ошибка сервера',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    console.error('Ошибка:', error.message);
+    res.status(500).json({ 
+      error: 'Внутренняя ошибка сервера' 
     });
   }
 });
 
-// Функция исправления кода (исправленная версия)
+// Исправление кода
 function fixKotlinCode(rawCode) {
   let code = rawCode.trim();
-
-  // Шаг 1: Удаляем ВСЕ объявления package (в начале каждой строки)
+  
+  // Удаляем все объявления package
   code = code.replace(/^package\s+[^\n]+/gm, '').trim();
-
-  // Шаг 2: Удаляем пустые строки в начале и конце
-  code = code.replace(/^\s+|\s+$/g, '');
-
-  // Шаг 3: Проверяем, есть ли уже правильная функция main
-  // Ищем "fun main" в начале строки (с возможными отступами)
+  
+  // Проверяем наличие fun main
   const hasMain = /^\s*fun\s+main\s*\(/m.test(code);
 
   if (!hasMain) {
-    // Оборачиваем код в fun main()
-    // Сохраняем отступы для многострочного кода
     const lines = code.split('\n');
     const indented = lines.map(line => line.trim() === '' ? '' : `    ${line}`).join('\n');
     return `fun main() {\n${indented}\n}`;
   }
-
+  
   return code;
 }
+
+// Запуск сервера
+app.listen(PORT, () => {
+  console.log(`🚀 Сервер запущен на порту ${PORT}`);
+}).on('error', (err) => {
+  console.error('🔥 КРИТИЧЕСКАЯ ОШИБКА при запуске:', err);
+  process.exit(1);
+});
+
+// Обработка ошибок
+process.on('uncaughtException', (err) => {
+  console.error('🔥 КРИТИЧЕСКАЯ ОШИБКА: Необработанное исключение', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🔥 КРИТИЧЕСКАЯ ОШИБКА: Необработанный промис', reason);
+  process.exit(1);
+});
