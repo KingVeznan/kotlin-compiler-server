@@ -76,11 +76,17 @@ app.post('/compile', async (req, res) => {
     );
 
     const jdoodleResult = response.data;
-    console.log(`✅ Ответ JDoodle: statusCode=${jdoodleResult.statusCode}, output length=${jdoodleResult.output?.length || 0}`);
+    console.log(`✅ Ответ JDoodle: statusCode=${jdoodleResult.statusCode}, output="${jdoodleResult.output?.substring(0, 100)}..."`);
 
+    let isRealSuccess = jdoodleResult.statusCode === 200;
+    if (jdoodleResult.output && jdoodleResult.output.includes('Could not find or load main class')) {
+      isRealSuccess = false;
+      console.log('⚠️ Обнаружена ошибка JDoodle внутри output!');
+    }
+    
     // ВСЕГДА возвращаем полный ответ, даже если есть ошибки компиляции
     res.json({
-      success: jdoodleResult.statusCode === 200,
+      success: isRealSuccess,
       output: jdoodleResult.output || 'Нет вывода',
       statusCode: jdoodleResult.statusCode,
       cpuTime: jdoodleResult.cpuTime || '0.00',
