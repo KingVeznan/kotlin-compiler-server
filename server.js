@@ -18,7 +18,7 @@ const MAX_REQUESTS_PER_HOUR = 100;
 app.get('/', (req, res) => {
   res.json({
     message: "Kotlin Compiler Server is running!",
-    version: "1.0.0",
+    version: "1.0.1",
     endpoint: "/compile"
   });
 });
@@ -30,7 +30,8 @@ app.post('/compile', async (req, res) => {
   
   if (count > MAX_REQUESTS_PER_HOUR) {
     return res.status(429).json({ 
-      error: 'Слишком много запросов. Попробуйте через час.' 
+      success: false,
+      error: 'Слишком много запросов. Попробуйте через час.'
     });
   }
   requestCounts.set(ip, count);
@@ -39,55 +40,103 @@ app.post('/compile', async (req, res) => {
   try {
     const { code } = req.body;
     
-    if (!code || code.length > 5000) {
+    if (!code || code.trim().length === 0) {
       return res.status(400).json({ 
-        error: 'Код не предоставлен или слишком длинный' 
+        success: false,
+        error: 'Код не предоставлен'
+      });
+    }
+    
+    if (code.length > 5000) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Код слишком длинный (максимум 5000 символов)'
       });
     }
 
-    // Исправление кода
-    const fixedCode = fixKotlinCode(code);
+    // ИСПРАВЛЕНИЕ: Гарантированно правильный формат для JDoodle
+    const fixedCode = fixKotlinCodeForJDoodle(code);
     
-    // Отправка в JDoodle
+    console.log(`📤 Отправленный в JDoodle код (от ${ip}):`);
+    console.log('---');
+    console.log(fixedCode);
+    console.log('---');
+
+    // Отправка в JDoodle с явным указанием версии Kotlin 1.8.0
     const response = await axios.post(
       'https://api.jdoodle.com/v1/execute',
       {
         script: fixedCode,
         language: 'kotlin',
-        versionIndex: '0',
+        versionIndex: '0', // Kotlin 1.8.0 — самая стабильная версия
         clientId: process.env.JDOODLE_CLIENT_ID,
         clientSecret: process.env.JDOODLE_CLIENT_SECRET
       },
       { timeout: 15000 }
     );
 
+    const jdoodleResult = response.data;
+    console.log(`✅ Ответ JDoodle: statusCode=${jdoodleResult.statusCode}, output length=${jdoodleResult.output?.length || 0}`);
+
+    // ВСЕГДА возвращаем полный ответ, даже если есть ошибки компиляции
     res.json({
-      success: true,
-      output: response.data.output || 'Нет вывода',
-      cpuTime: response.data.cpuTime
+      success: jdoodleResult.statusCode === 200,
+      output: jdoodleResult.output || 'Нет вывода',
+      statusCode: jdoodleResult.statusCode,
+      cpuTime: jdoodleResult.cpuTime || '0.00',
+      memory: jdoodleResult.memory
     });
 
   } catch (error) {
-    console.error('Ошибка:', error.message);
+    console.error('❌ Ошибка при обращении к JDoodle:', error.message);
+    
+    if (error.response) {
+      console.error('Данные ошибки от JDoodle:', error.response.data);
+      return res.status(400).json({
+        success: false,
+        error: 'Ошибка компиляции',
+        details: error.response.data
+      });
+    }
+    
     res.status(500).json({ 
-      error: 'Внутренняя ошибка сервера' 
+      success: false,
+      error: 'Внутренняя ошибка сервера: ' + error.message
     });
   }
 });
 
-// Исправление кода
-function fixKotlinCode(rawCode) {
-  let code = rawCode.trim();
+// 🔑 КЛЮЧЕВАЯ ФУНКЦИЯ: Гарантированно правильный формат для JDoodle
+function fixKotlinCodeForJDoodle(rawCode) {
+  // Шаг 1: Удаляем ВСЕ объявления package
+  let code = rawCode.trim().replace(/^package\s+[^\n]+/gm, '').trim();
   
-  // Удаляем все объявления package
-  code = code.replace(/^package\s+[^\n]+/gm, '').trim();
+  // Шаг 2: Удаляем многострочные комментарии в начале (могут мешать)
+  code = code.replace(/^\/\*[\s\S]*?\*\//m, '').trim();
   
-  // Проверяем наличие fun main
-  const hasMain = /^\s*fun\s+main\s*\(/m.test(code);
-
-  if (!hasMain) {
+  // Шаг 3: Удаляем однострочные комментарии в начале
+  code = code.replace(/^\/\/[^\n]*\n/gm, '').trim();
+  
+  // Шаг 4: Проверяем наличие ПРАВИЛЬНОГО объявления main
+  // JDoodle требует именно: fun main() { ... } с фигурными скобками
+  const hasProperMain = /fun\s+main\s*\(\s*\)\s*\{/m.test(code);
+  
+  if (!hasProperMain) {
+    // Оборачиваем ВЕСЬ код в правильную структуру
+    // Убираем лишние пустые строки
+    code = code.replace(/^\s+|\s+$/g, '');
+    
+    // Если код пустой — возвращаем минимальный рабочий код
+    if (code.length === 0) {
+      return 'fun main() {\n    println("Код пустой")\n}';
+    }
+    
+    // Добавляем отступы для каждой строки
     const lines = code.split('\n');
-    const indented = lines.map(line => line.trim() === '' ? '' : `    ${line}`).join('\n');
+    const indented = lines
+      .map(line => line.trim() === '' ? '' : `    ${line}`)
+      .join('\n');
+    
     return `fun main() {\n${indented}\n}`;
   }
   
@@ -97,18 +146,19 @@ function fixKotlinCode(rawCode) {
 // Запуск сервера
 app.listen(PORT, () => {
   console.log(`🚀 Сервер запущен на порту ${PORT}`);
+  console.log(`📡 URL: http://localhost:${PORT}`);
 }).on('error', (err) => {
-  console.error('🔥 КРИТИЧЕСКАЯ ОШИБКА при запуске:', err);
+  console.error('🔥 Ошибка запуска сервера:', err);
   process.exit(1);
 });
 
 // Обработка ошибок
 process.on('uncaughtException', (err) => {
-  console.error('🔥 КРИТИЧЕСКАЯ ОШИБКА: Необработанное исключение', err);
+  console.error('🔥 Необработанное исключение:', err);
   process.exit(1);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('🔥 КРИТИЧЕСКАЯ ОШИБКА: Необработанный промис', reason);
+process.on('unhandledRejection', (reason) => {
+  console.error('🔥 Необработанный промис:', reason);
   process.exit(1);
 });
